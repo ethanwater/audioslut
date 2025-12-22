@@ -7,12 +7,14 @@
 
 #define SAMPLE_RATE 48000
 
-typedef struct
-{
-	float left_phase;
-	float right_phase;
-} 
-phaseData;
+//typedef struct
+//{
+//	float left_phase;
+//	float right_phase;
+//} 
+//phaseData;
+
+float nox = 0.0f; 
 
 static int AudioStreamCallback
 (
@@ -23,49 +25,48 @@ static int AudioStreamCallback
 	PaStreamCallbackFlags statusFlags,
 	void *userData
 ) {
-	phaseData *data = (phaseData*)userData;
+	//phaseData *data = (phaseData*)userData;
 	float *out = (float*)outputBuffer;
 	unsigned int i;
 	(void) inputBuffer;
 	
 	for (i = 0; i < framesPerBuffer; i++) {
-    float left = sinf(data->left_phase);
-    float right = sinf(data->right_phase);
-
-    *out++ = left;
-    *out++ = right;
-
-    data->left_phase += 2.0f * M_PI * 820.0f / SAMPLE_RATE;
-    data->right_phase += 2.0f * M_PI * 820.0f / SAMPLE_RATE;
-
-    if (data->left_phase >= 2.0f * M_PI)
-        data->left_phase -= 2.0f * M_PI;
-    if (data->right_phase >= 2.0f * M_PI)
-        data->right_phase -= 2.0f * M_PI;
+		//TODO: make it not sound like grinding teeth
+    float x = sinf(nox);
+    *out = x;
 	}
   return paContinue;
 }
 
+float midiToFrequency(int midiNoteNumber);
+
 void MidiStreamCallback(double deltatime, std::vector<unsigned char> *message, void *userData) {
-	unsigned int nBytes = message->size();
-  for (unsigned int i=0; i<nBytes; i++) {
-		//byte0 -> statusbyte
-		//byte1 -> note (pitch)
-		//byte2 -> attack velocity (volume)
-    std::cout << "Byte " << i << " = " << (int)message->at(i) << ", ";
-	}
-  if (nBytes > 0) {
-    std::cout << "stamp = " << deltatime << std::endl;
+	//byte0 -> statusbyte
+	//byte1 -> note (pitch)
+	//byte2 -> attack velocity (volume)
+	if ((int)message->at(2) == 0) {
+		nox = 0.0f;
+	} else {
+		int midinote = message->at(1); //byte1 is all we care about rn
+		float freq = midiToFrequency(midinote);
+		nox = freq;
+		printf("note: %u | freq: %f\n", midinote, freq);
 	}
 };
 
+float midiToFrequency(int midiNoteNumber) {
+	float freq = 440.0 * pow(2., ((float)midiNoteNumber-69.)/12.);
+	return freq;
+}
+
 int main(void) {
 	/* midi */
+	//TODO: support layering notes
 	std::vector<RtMidi::Api> apis;
   RtMidi::getCompiledApi(apis);
-	RtMidi::Api coreapi = apis[0];
+	RtMidi::Api CoreMidi = apis[0];
 
-	RtMidiIn *midiin = new RtMidiIn(coreapi, "Apple CoreMidi Hook", 100); 
+	RtMidiIn *midiin = new RtMidiIn(CoreMidi, "Apple CoreMidi Hook", 100); 
 
 	unsigned int nPorts = midiin->getPortCount();
   if ( nPorts == 0 ) {
@@ -74,11 +75,8 @@ int main(void) {
 		printf("num of midi ports: %u\n", nPorts);
 	}
 
-
 	midiin->openPort(0);
 	midiin->setCallback(&MidiStreamCallback);
-
-	while(true) {};
 
 
 	/* sound */
@@ -95,7 +93,8 @@ int main(void) {
 	error_lambda(err, true);
 
 	PaStream *stream;
-	phaseData data = {0.0f, 0.0f};
+	//phaseData data = {0.0f, 0.0f};
+	int* data = nullptr;
 	
 	auto device_idx = Pa_GetDefaultOutputDevice();
 	auto device_ct = Pa_GetDeviceCount();
@@ -127,8 +126,8 @@ int main(void) {
 
 	PaError start_playback = Pa_StartStream(stream);
 	error_lambda(start_playback, true);
-
-	Pa_Sleep(2000);
+	
+	while(true) {};
 
 	PaError stop_playback = Pa_StopStream(stream);
 	error_lambda(stop_playback, false);
