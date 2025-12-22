@@ -2,7 +2,9 @@
 #include <cstdlib>
 #include <math.h>
 #include <portaudio.h>
+#include "rtmidi/RtMidi.h"
 #include <random>
+
 #define SAMPLE_RATE 48000
 
 typedef struct
@@ -12,7 +14,7 @@ typedef struct
 } 
 phaseData;
 
-static int streamCallback
+static int AudioStreamCallback
 (
 	const void *inputBuffer,
 	void *outputBuffer,
@@ -44,7 +46,42 @@ static int streamCallback
   return paContinue;
 }
 
+void MidiStreamCallback(double deltatime, std::vector<unsigned char> *message, void *userData) {
+	unsigned int nBytes = message->size();
+  for (unsigned int i=0; i<nBytes; i++) {
+		//byte0 -> statusbyte
+		//byte1 -> note (pitch)
+		//byte2 -> attack velocity (volume)
+    std::cout << "Byte " << i << " = " << (int)message->at(i) << ", ";
+	}
+  if (nBytes > 0) {
+    std::cout << "stamp = " << deltatime << std::endl;
+	}
+};
+
 int main(void) {
+	/* midi */
+	std::vector<RtMidi::Api> apis;
+  RtMidi::getCompiledApi(apis);
+	RtMidi::Api coreapi = apis[0];
+
+	RtMidiIn *midiin = new RtMidiIn(coreapi, "Apple CoreMidi Hook", 100); 
+
+	unsigned int nPorts = midiin->getPortCount();
+  if ( nPorts == 0 ) {
+    std::cout << "No ports available!\n";
+  } else {
+		printf("num of midi ports: %u\n", nPorts);
+	}
+
+
+	midiin->openPort(0);
+	midiin->setCallback(&MidiStreamCallback);
+
+	while(true) {};
+
+
+	/* sound */
 	auto error_lambda = [](PaError err, bool critical) { 
 		if (err != paNoError) {
 			printf("error:%s\n", Pa_GetErrorText(err)); 
@@ -83,7 +120,7 @@ int main(void) {
 		SAMPLE_RATE,
 		256,
 		paNoFlag,
-		streamCallback,
+		AudioStreamCallback,
 		&data
 	);
 	error_lambda(openStreamResult, false);
