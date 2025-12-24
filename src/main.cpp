@@ -14,9 +14,16 @@
 
 #define SAMPLE_RATE 48000  
 
+/*
+ * dev notes:
+ * 1. Qt C++20 will be used for the GUI: https://doc.qt.io/qt-6/cpp20-overview.html
+ * 2. 
+ *
+ */
 typedef struct {
 	int note;
 	float volume;
+	//PaStream** stream;
 } MidiOutput;
 
 float FreqToPhase(float freq);
@@ -50,6 +57,8 @@ int main(void) {
 
 	/* MIDI */
 	//TODO: realtime midi port search 
+	PaStream *stream;
+
 	MidiOutput midi = MidiOutput{0, 0.0f};
 
 	std::vector<RtMidi::Api> apis; RtMidi::getCompiledApi(apis);
@@ -71,8 +80,6 @@ int main(void) {
 		device_info->name 
 	);
 
-	PaStream *stream;
-
 	PaStreamParameters pastream_out = PaStreamParameters{
 		device_index,
 		2,
@@ -90,7 +97,7 @@ int main(void) {
 		paNoFlag,
 		AudioStreamCallback,
 		&midi
-	), false);
+	), true);
 	error_lambda(Pa_StartStream(stream), true);
 	while(true) {};
 	error_lambda(Pa_StopStream(stream), false);
@@ -109,26 +116,26 @@ static int AudioStreamCallback
 	PaStreamCallbackFlags statusFlags,
 	void *userData
 ) {
-	double *out = (double*)outputBuffer;
+	float *out = (float*)outputBuffer;
 	MidiOutput *data = (MidiOutput*)userData;
-	unsigned int i;
 	(void) inputBuffer;
 
 	float note_frequency = MidiToFreq(data->note);
 	float note_phase = FreqToPhase(note_frequency);
 	float note_phase_iter = note_phase/SAMPLE_RATE;
 	float note_volume = data->volume;
+	static float ctr = 0.0;
 	
-	if (data->note != 0) {
-		double ctr = 0.0;
-		for (i = 0; i < framesPerBuffer; i++) {
+	for(unsigned int i =0; i <framesPerBuffer; i++) {
+		if (data->note != 0) {
 			ctr += note_phase_iter;
-			if (ctr > (2*M_PI)) {
-				ctr = fmod(ctr, (2.0*M_PI));
+			if (ctr > (2.0f*M_PI)) {
+				ctr = fmod(ctr, (2.0f*M_PI)) * 0.1;
 			}
-			*out++ = sin(ctr);
 		}
-	}	
+		*out++ = sin(ctr);
+		*out++ = sin(ctr);
+	}
 
   return paContinue;
 }
@@ -140,15 +147,16 @@ void MidiStreamCallback(double deltatime, std::vector<unsigned char> *message, v
 	int volumebyte = message->at(2);
 
 	MidiOutput *data = (MidiOutput*)userData;
-	data->note = notebyte;
-	data->volume = (float)volumebyte;
 
 	//DEBUGGING PURPOSES
 	bool is_note_on = (statusbyte == 144) ? true : false;
   if (!is_note_on) {
-		data->note = -1;
+		data->note = 0;
+		data->volume = 0.0f;
 		std::cout<<"[NOTE OFF]"<< std::endl;
 	} else {
+		data->note = notebyte;
+		data->volume = (float)volumebyte;
 		std::cout<<"[NOTE ON ]  Note:: " << data->note << " Volume:: " << data->volume;
 		for ( unsigned int i=0; i<nbytes; i++ )
   	  std::cout << "Byte " << i << " = " << (int)message->at(i) << ", ";
