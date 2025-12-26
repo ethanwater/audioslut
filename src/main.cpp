@@ -9,6 +9,8 @@
 #include <math.h>
 #include <portaudio.h>
 #include <random>
+#include <chrono>
+#include <thread>
 
 #include "rtmidi/RtMidi.h"
 
@@ -16,10 +18,13 @@
 
 /*
  * dev notes:
- * 1. Qt C++20 will be used for the GUI: https://doc.qt.io/qt-6/cpp20-overview.html
- * 2. 
- *
+ * Qt C++20 will be used for the GUI: https://doc.qt.io/qt-6/cpp20-overview.html
+ * SUBTRACTIVE SYNTHESIS: https://en.wikipedia.org/wiki/Subtractive_synthesis
+ * VST/VST3 Compatability is a fuckin MUST. What would be the point without it? 
  */
+
+bool isNoteBeingPlayed;
+
 typedef struct {
 	int note;
 	float volume;
@@ -30,6 +35,7 @@ float FreqToPhase(float freq);
 float MidiToFreq(int midiNote);
 float Normalize(float x);
 void PrintAudioSlut();
+
 static int AudioStreamCallback(
 	const void *inputBuffer,
 	void *outputBuffer,
@@ -38,13 +44,25 @@ static int AudioStreamCallback(
 	PaStreamCallbackFlags statusFlags,
 	void *userData
 );
+
 void MidiStreamCallback(
 	double deltatime, 
 	std::vector<unsigned char> *message, 
 	void *userData
 );
 
+//TODO: MIDI SOURCE POLLING FOR NEAR REALTIME DEV. CONNECTIONS
+//bool PollMidiSource(RtMidiIn *midi) {
+//	//sleep 1sec
+//	//get port count
+//	//if no ports found return true
+//	std::this_thread::sleep_for(std::chrono::seconds(1));
+//	unsigned int pc = midi->getPortCount();
+//	return (pc > 0);
+//}
+
 int main(void) {
+	isNoteBeingPlayed = false;
 	PrintAudioSlut();
 	auto error_lambda = [](PaError err, bool critical) { 
 		if (err != paNoError) {
@@ -56,7 +74,6 @@ int main(void) {
 	};
 
 	/* MIDI */
-	//TODO: realtime midi port search 
 	PaStream *stream;
 
 	MidiOutput midi = MidiOutput{0, 0.0f};
@@ -64,8 +81,9 @@ int main(void) {
 	std::vector<RtMidi::Api> apis; RtMidi::getCompiledApi(apis);
 	RtMidi::Api CoreMidi = apis[0];
 	RtMidiIn *midiin = new RtMidiIn(CoreMidi, "Apple CoreMidi", 100); 
-
+	
 	midiin->openPort(0);
+	midiin->ignoreTypes(true, true, false);
 	midiin->setCallback(&MidiStreamCallback, &midi);
 
 	/* AUDIO */
@@ -82,7 +100,7 @@ int main(void) {
 
 	PaStreamParameters pastream_out = PaStreamParameters{
 		device_index,
-		2,
+		2, 
 		paFloat32,
 		1,
 		NULL
@@ -130,7 +148,7 @@ static int AudioStreamCallback
 		if (data->note != 0) {
 			ctr += note_phase_iter;
 			if (ctr > (2.0f*M_PI)) {
-				ctr = fmod(ctr, (2.0f*M_PI)) * 0.1;
+				ctr = fmod(ctr, (2.0f*M_PI));
 			}
 		}
 		*out++ = sin(ctr);
@@ -140,21 +158,31 @@ static int AudioStreamCallback
   return paContinue;
 }
 
+//TODO: noteON/OFF too strict.
 void MidiStreamCallback(double deltatime, std::vector<unsigned char> *message, void *userData) {
+	MidiOutput *data = (MidiOutput*)userData;
+
 	unsigned int nbytes = message->size();
+	if (nbytes <= 0) {
+		data->note = 0;
+		data->volume = 0.0f;
+		return;
+	}
 	int statusbyte = message->at(0);
 	int notebyte = message->at(1);
 	int volumebyte = message->at(2);
-
-	MidiOutput *data = (MidiOutput*)userData;
+	
 
 	//DEBUGGING PURPOSES
 	bool is_note_on = (statusbyte == 144) ? true : false;
   if (!is_note_on) {
-		data->note = 0;
-		data->volume = 0.0f;
-		std::cout<<"[NOTE OFF]"<< std::endl;
+		if (!isNoteBeingPlayed) {
+			data->note = 0;
+			data->volume = 0.0f;
+			std::cout<<"[NOTE OFF]"<< std::endl;
+		}
 	} else {
+		isNoteBeingPlayed = true;
 		data->note = notebyte;
 		data->volume = (float)volumebyte;
 		std::cout<<"[NOTE ON ]  Note:: " << data->note << " Volume:: " << data->volume;
