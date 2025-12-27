@@ -33,10 +33,20 @@ typedef struct {
 
 float FreqToPhase(float freq);
 float MidiToFreq(int midiNote);
+float NotePhase(int note);
 float Normalize(float x);
 void PrintAudioSlut();
 
-static int AudioStreamCallback(
+static int ArpeggioAudioStreamCallback(
+	const void *inputBuffer,
+	void *outputBuffer,
+	unsigned long framesPerBuffer,
+	const PaStreamCallbackTimeInfo* timeInfo,
+	PaStreamCallbackFlags statusFlags,
+	void *userData
+);
+
+static int SimpleAudioStreamCallback(
 	const void *inputBuffer,
 	void *outputBuffer,
 	unsigned long framesPerBuffer,
@@ -113,7 +123,7 @@ int main(void) {
 		SAMPLE_RATE,
 		256,
 		paNoFlag,
-		AudioStreamCallback,
+		ArpeggioAudioStreamCallback,
 		&midi
 	), true);
 	error_lambda(Pa_StartStream(stream), true);
@@ -124,8 +134,78 @@ int main(void) {
 	return 0;
 }
 
+//Arpeggio Loop. Only works on monophonic midi callbacks for now. Staying here bc pretty.
+static int ArpeggioAudioStreamCallback(
+  const void *inputBuffer,
+  void *outputBuffer,
+  unsigned long framesPerBuffer,
+  const PaStreamCallbackTimeInfo*,
+  PaStreamCallbackFlags,
+  void *userData
+) {
+  float *out = (float*)outputBuffer;
+  MidiOutput *data = (MidiOutput*)userData;
+  (void) inputBuffer;
+
+  static float phase = 0.0f;
+  static float env = 0.0f;
+  static float noteTimer = 0.0f;
+  static size_t arpIndex = 0;
+
+  float attack = 0.0001f;   // instant pluck
+  float release = 0.002f;   // short decay
+  float arpSpeed = 0.12f;   // seconds per note
+  float sampleStep = 1.0f / SAMPLE_RATE;
+
+  // Keep track of active notes
+  static std::vector<int> heldNotes;
+
+  // Update held notes
+  if (data->note != 0 && std::find(heldNotes.begin(), heldNotes.end(), data->note) == heldNotes.end())
+      heldNotes.push_back(data->note);
+  else if (data->note == 0)
+      heldNotes.clear();
+
+  for (unsigned int i = 0; i < framesPerBuffer; i++) {
+
+      // Advance arpeggio timer
+      noteTimer += sampleStep;
+      if (noteTimer >= arpSpeed && !heldNotes.empty()) {
+          noteTimer -= arpSpeed;
+          arpIndex = (arpIndex + 1) % heldNotes.size();
+      }
+
+      int currentNote = heldNotes.empty() ? 0 : heldNotes[arpIndex];
+
+      // Envelope
+      float targetEnv = (currentNote != 0) ? 1.0f : 0.0f;
+      if (env < targetEnv) env += attack;
+      if (env > targetEnv) env -= release;
+      if (env < 0.0f) env = 0.0f;
+      if (env > 1.0f) env = 1.0f;
+
+      // Frequency
+      float freq = MidiToFreq(currentNote == 0 ? 60 : currentNote);
+      float inc = (2.0f * M_PI * freq) / SAMPLE_RATE;
+      phase += inc;
+      if (phase > 2*M_PI) phase -= 2*M_PI;
+
+      // Bell-like sine
+      float sig = sinf(phase);
+
+      // Apply envelope and velocity
+      float vel = data->volume / 127.0f;
+      float outSig = sig * env * vel * 0.5f;
+
+      *out++ = outSig;
+      *out++ = outSig;
+  }
+
+  return paContinue;
+}
+
 //TODO: POLYPHONY:: rtmidi handles this already- so it is solely based on our audio engine
-static int AudioStreamCallback
+static int SimpleAudioStreamCallback
 (
 	const void *inputBuffer,
 	void *outputBuffer,
@@ -138,13 +218,12 @@ static int AudioStreamCallback
 	MidiOutput *data = (MidiOutput*)userData;
 	(void) inputBuffer;
 
-	float note_frequency = MidiToFreq(data->note);
-	float note_phase = FreqToPhase(note_frequency);
-	float note_phase_iter = note_phase/SAMPLE_RATE;
-	float note_volume = data->volume;
-	static float ctr = 0.0;
-	
 	for(unsigned int i =0; i <framesPerBuffer; i++) {
+		float note_phase = NotePhase(data->note);
+		float note_phase_iter = note_phase/SAMPLE_RATE;
+		float note_volume = data->volume;
+		static float ctr = 0.0;
+
 		if (data->note != 0) {
 			ctr += note_phase_iter;
 			if (ctr > (2.0f*M_PI)) {
@@ -156,6 +235,13 @@ static int AudioStreamCallback
 	}
 
   return paContinue;
+}
+
+float NotePhase(int note) {
+	float note_frequency = MidiToFreq(note);
+	float note_phase = FreqToPhase(note_frequency);
+	return note_phase;
+	
 }
 
 //TODO: noteON/OFF too strict.
