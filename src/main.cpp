@@ -21,7 +21,13 @@
  * Qt C++20 will be used for the GUI: https://doc.qt.io/qt-6/cpp20-overview.html
  * SUBTRACTIVE SYNTHESIS: https://en.wikipedia.org/wiki/Subtractive_synthesis
  * VST/VST3 Compatability is a fuckin MUST. What would be the point without it? 
+ *
  */
+
+/* todo:
+ * MIDI device realtime connection search
+ * POLYPHONIC MIDI
+*/ 
 
 bool isNoteBeingPlayed;
 
@@ -114,7 +120,7 @@ int main(void)
     SAMPLE_RATE,
     256,
     paNoFlag,
-    SimpleAudioStreamCallback,
+    ArpeggioAudioStreamCallback,
     &midi
   ), true);
 
@@ -244,8 +250,6 @@ void MidiStreamCallback(double deltatime, std::vector<unsigned char> *message, v
 
   bool is_note_on = (statusbyte == 144);
   if (!is_note_on) {
-    data->note = 0;
-    data->volume = 0.0f;
     isNoteBeingPlayed = false;
     std::cout << "[NOTE OFF]" << std::endl;
   } else {
@@ -274,7 +278,7 @@ float Normalize(float x)
 void PrintAudioSlut()
 {
   std::cout << R"(
-                   ___            __      __   
+                       ___            __      __   
       ____ ___  ______/ (_)___  _____/ /_  __/ /_  
      / __ `/ / / / __  / / __ \/ ___/ / / / / __/   
     / /_/ / /_/ / /_/ / / /_/ (__  ) / /_/ / /_     
