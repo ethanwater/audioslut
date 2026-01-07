@@ -25,7 +25,7 @@
  */
 
 /* todo:
- * MIDI device realtime connection search
+ * MIDI device realtime connection search (low priority)
  * POLYPHONIC MIDI
 */ 
 
@@ -35,6 +35,8 @@ typedef struct {
   int note;
   float volume;
 } MidiOutput;
+
+float ARPSPEED = 0.12f;
 
 float FreqToPhase(float freq);
 float MidiToFreq(int midiNote);
@@ -125,13 +127,25 @@ int main(void)
   ), true);
 
   error_lambda(Pa_StartStream(stream), true);
-  while (true) {}
+  while (true) {
+    std::cin >> ARPSPEED; //lazy live audio change
+  }
 
   error_lambda(Pa_StopStream(stream), false);
   error_lambda(Pa_CloseStream(stream), false);
   error_lambda(Pa_Terminate(), false);
   return 0;
 }
+
+float Arpeggio( //eventually these configs can be turned on/off. so a functional approahc is best. plus we may want
+                //to layer some sounds. however Arpeggio is an exception. The sound of each notes can be layered but
+                //not the Arpeggi function itself.***
+    int note, 
+    float attack = 0.0001f, 
+    float release = 0.002f,
+    float speed = 0.12f,
+    float step = 1.0f / SAMPLE_RATE
+  );
 
 // Arpeggio Loop. Only works on monophonic midi callbacks for now. Staying here bc pretty.
 static int ArpeggioAudioStreamCallback(
@@ -154,7 +168,7 @@ static int ArpeggioAudioStreamCallback(
 
   float attack = 0.0001f;
   float release = 0.002f;
-  float arpSpeed = 0.12f;
+  float arpSpeed = ARPSPEED;
   float sampleStep = 1.0f / SAMPLE_RATE;
 
   static std::vector<int> heldNotes;
@@ -195,7 +209,7 @@ static int ArpeggioAudioStreamCallback(
   return paContinue;
 }
 
-// Simple mono synth
+// simle mono synth
 static int SimpleAudioStreamCallback(
   const void *inputBuffer,
   void *outputBuffer,
@@ -209,17 +223,17 @@ static int SimpleAudioStreamCallback(
   MidiOutput *data = (MidiOutput*)userData;
   (void) inputBuffer;
 
-  static float ctr = 0.0f;
+  static float phase = 0.0f;
 
   for (unsigned int i = 0; i < framesPerBuffer; i++) {
     if (data->note != 0) {
       float freq = MidiToFreq(data->note);
       float inc = (2.0f * M_PI * freq) / SAMPLE_RATE;
-      ctr += inc;
-      if (ctr > 2.0f * M_PI) ctr -= 2.0f * M_PI;
+      phase += inc;
+      if (phase > 2.0f * M_PI) phase -= 2.0f * M_PI;
     }
 
-    float sig = sinf(ctr);
+    float sig = sinf(phase);
     *out++ = sig;
     *out++ = sig;
   }
